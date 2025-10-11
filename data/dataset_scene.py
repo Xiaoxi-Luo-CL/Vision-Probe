@@ -172,7 +172,7 @@ class Dataset(Dataset):
             max_frame_dist_start = view_selector_config.get("curriculum_start_max_frame_dist", 64)
             cur_min_frame_dist = int(min_frame_dist_start + (min_frame_dist - min_frame_dist_start) * progress)
             cur_max_frame_dist = int(max_frame_dist_start + (max_frame_dist - max_frame_dist_start) * progress)
-            if cur_min_frame_dist <= cur_max_frame_dist:
+            if cur_max_frame_dist <= cur_min_frame_dist:
                 return None
             return two_frame_selector(frames, num_views, cur_min_frame_dist, cur_max_frame_dist)
         else:
@@ -195,7 +195,7 @@ class Dataset(Dataset):
         else:
             # sample input and target views
             image_indices = self.view_selector(frames, self.current_iteration)
-            if image_indices is None:
+            if image_indices is None or len(image_indices) == 0:
                 return self.__getitem__(random.randint(0, len(self) - 1))
             context_indices = None
             target_indices = None

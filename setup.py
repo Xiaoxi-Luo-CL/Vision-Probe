@@ -228,20 +228,10 @@ def init_wandb_and_backup(config):
 
     # WandB initialization
     config_copy = copy.deepcopy(config)
-    # wandb.init(
-    #     project=config.training.wandb_project,
-    #     name=config.training.wandb_exp_name,
-    #     config=config_copy,
-    # )
-
-    wandb.login(host="https://adobesensei.wandb.io/")
     wandb.init(
-        # dir="/home/user/wandb",
-        dir='./wandb',
         project=config.training.wandb_project,
         name=config.training.wandb_exp_name,
         config=config_copy,
-        entity="research-3gi",
     )
 
     # Source code backup
