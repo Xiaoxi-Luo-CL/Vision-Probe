@@ -19,5 +19,5 @@ Results will be saved to `rayzer_camera_tokens/rank_{i}.pt`, where `rank_{i}` in
 
 Then run `train_probe.py` to train probe based on cached hidden states.
 ```
-python train_probe.py probe.camera_tokens_path=rayzer_camera_tokens.pt
+python train_probe.py probe.camera_tokens_folder=rayzer_camera_tokens/
 ```

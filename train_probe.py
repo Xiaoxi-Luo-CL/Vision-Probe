@@ -156,4 +156,4 @@ def main(config: DictConfig):
 if __name__ == "__main__":
     OmegaConf.register_new_resolver("calc_path", get_custom_dir)
     main()
-    # python train_probe.py probe.camera_tokens_folder=rayzer_camera_tokens.pt
+    # python train_probe.py probe.camera_tokens_folder=rayzer_camera_tokens/
