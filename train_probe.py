@@ -82,8 +82,6 @@ def main(config: DictConfig):
 
     # load camera tokens
     camera_tokens = merge_camera_tokens(config.probe.camera_tokens_folder)
-    # camera_tokens = torch.load(
-    #     config.probe.camera_tokens_path, weights_only=False)
 
     v_all = config.training.num_views
     cano_idx, rel_indices = get_canonical_idx(v_all, config)
@@ -158,4 +156,4 @@ def main(config: DictConfig):
 if __name__ == "__main__":
     OmegaConf.register_new_resolver("calc_path", get_custom_dir)
     main()
-    # python train_probe.py probe.camera_tokens_path=rayzer_camera_tokens.pt
+    # python train_probe.py probe.camera_tokens_folder=rayzer_camera_tokens.pt

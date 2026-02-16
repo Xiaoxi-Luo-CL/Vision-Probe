@@ -1,7 +1,7 @@
 metric_checkpoint
 preprocessed_data
 data_scripts/
-dl3dv_benchmark/
+dl3dv_benchmark
 dl3dv_benchmark.zip
 experiments/
 log/
@@ -15,11 +15,12 @@ wandb/
 train.sh
 eval.sh
 venv/
+venv
 archive/
 *.pt
-rayzer_camera_tokens/
+rayzer_camera_tokens
 outputs/
-model_checkpoints/
+model_checkpoints
 
 
 .DS_Store
