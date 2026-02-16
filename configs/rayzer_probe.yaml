@@ -1,0 +1,48 @@
+model:
+  class_name: model.rayzer.RayZer
+  image_tokenizer:
+    image_size: 256
+    patch_size: 16    # use 8 if you have enough compute
+    in_channels: 3
+  transformer:
+    d: 768
+  pose_latent:
+    length: 1
+    canonical: middle   # use middle frame as reference frame
+
+training:
+  api_key_path: ./configs/api_keys.yaml
+  num_views: 24
+  num_input_views: 16
+  num_target_views: 8
+
+# inference / evaluation
+inference:
+  if_inference: False
+  compute_metrics: False
+  view_idx_file_path: ./data/rayzer_evaluation_index_dl3dv_even.json
+  render_video: False
+  render_video_config:
+    traj_type: interpolate
+    num_frames: 30
+    loop_video: True 
+    ordr_poses: False
+
+  
+probe:
+  type: mlp  # 'mlp' or 'linear' or 'multilinear'
+  hidden_sizes: [512] # [2], [4], ..., [1024], or multiple layers
+  optimizer: AdamW # 'Adam' or 'SGD' or 'AdamW' 
+  camera_tokens_folder: rayzer_camera_tokens/
+  batch_size: 32
+  activation: ReLU # or 'SiLU'
+  seed: 42
+  max_epoch: 10
+  early_stopping: 3
+  lr: 1e-3
+
+out_dir: ${calc_path:${probe.type}, ${probe.hidden_sizes}, ${model.class_name}, ${probe.seed}}
+
+hydra:
+  run:
+    dir: ${out_dir}

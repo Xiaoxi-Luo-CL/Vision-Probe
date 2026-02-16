@@ -7,7 +7,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
 from setup import init_config, init_distributed
-from utils.metric_utils import export_results, summarize_evaluation
+from model.rayzer import RayZer, RayZerHiddenCollector
+from collections import defaultdict
+from tqdm import tqdm
 
 # Load config and read(override) arguments from CLI
 config = init_config()
@@ -23,9 +25,9 @@ dist.barrier()
 torch.backends.cuda.matmul.allow_tf32 = config.training.use_tf32
 torch.backends.cudnn.allow_tf32 = config.training.use_tf32
 amp_dtype_mapping = {
-    "fp16": torch.float16, 
-    "bf16": torch.bfloat16, 
-    "fp32": torch.float32, 
+    "fp16": torch.float16,
+    "bf16": torch.bfloat16,
+    "fp32": torch.float32,
     'tf32': torch.float32
 }
 
@@ -34,7 +36,7 @@ amp_dtype_mapping = {
 dataset_name = config.training.get("dataset_name", "data.dataset.Dataset")
 module, class_name = dataset_name.rsplit(".", 1)
 Dataset = importlib.import_module(module).__dict__[class_name]
-dataset = Dataset(config)
+dataset = Dataset(config)  # each element [24, 3, 256, 256]
 
 datasampler = DistributedSampler(dataset)
 dataloader = DataLoader(
@@ -45,7 +47,7 @@ dataloader = DataLoader(
     prefetch_factor=config.training.prefetch_factor,
     persistent_workers=True,
     pin_memory=False,
-    drop_last=True,
+    drop_last=False,  # when extracting hidden layers, we want all
     sampler=datasampler
 )
 dataloader_iter = iter(dataloader)
@@ -53,63 +55,64 @@ dataloader_iter = iter(dataloader)
 dist.barrier()
 
 
-
-# Import model and load checkpoint
-module, class_name = config.model.class_name.rsplit(".", 1)
-LVSM = importlib.import_module(module).__dict__[class_name]
-model = LVSM(config).to(ddp_info.device)
+_, class_name = config.model.class_name.rsplit(".", 1)
+assert class_name == 'RayZer', 'Currently only support RayZer for inference'
+model = RayZer(config).to(ddp_info.device)
 model = DDP(model, device_ids=[ddp_info.local_rank])
-
+print(
+    f"Rank: {dist.get_rank()} | PID: {os.getpid()} | Parent PID: {os.getppid()}")
 
 if config.inference.get("model_path", None) is not None and config.inference.get("if_inference", False):
     # use the specified checkpoint if specified
-    checkpoint = torch.load(config.inference.model_path, map_location="cpu", weights_only=True)
-    model.module.load_state_dict(checkpoint["model"], strict=False) # strict=False because the loss computer is different from internal version, BE CAREFUL!
+    checkpoint = torch.load(config.inference.model_path,
+                            map_location="cpu", weights_only=True)
+    # strict=False because the loss computer is different from internal version, BE CAREFUL!
+    model.module.load_state_dict(checkpoint["model"], strict=False)
 elif config.inference.get("model_path", None) is None and config.inference.get("if_inference", False):
     # otherwise, use the last training checkpoint
     model.module.load_ckpt(config.training.checkpoint_dir)
-
-inference_sampling = config.inference.view_idx_file_path.replace('.json', '').split('_')[-1]
-inference_out_dir = os.path.join(
-    config.get("inference_out_root", None), config.training.wandb_exp_name + '_' + config.training.view_selector.type + '_' + inference_sampling
-)
-if ddp_info.is_main_process:  
-    print(f"Running inference; save results to: {inference_out_dir}")
-    os.makedirs(inference_out_dir, exist_ok=True)
-    # avoid multiple processes downloading LPIPS at the same time
-    import lpips
-    # Suppress the warning by setting weights_only=True
-    import warnings
-    warnings.filterwarnings('ignore', category=FutureWarning)
 
 dist.barrier()
 
 
 datasampler.set_epoch(0)
 model.eval()
+collector = RayZerHiddenCollector(
+    model.module if hasattr(model, 'module') else model, layer_to_collect=[i for i in range(config.model.transformer.encoder_n_layer)])
+collector.register_hooks()
+
+save_path = 'rayzer_camera_tokens/'
+os.makedirs(save_path, exist_ok=True)
+data_to_save = {'camera_token': defaultdict(list), 'c2w': []}
 
 with torch.no_grad(), torch.autocast(
     enabled=config.training.use_amp,
     device_type="cuda",
     dtype=amp_dtype_mapping[config.training.amp_dtype],
 ):
-    for batch in dataloader:
-        batch = {k: v.to(ddp_info.device) if type(v) == torch.Tensor else v for k, v in batch.items()}
-        if 'LVSM' in config.model.class_name:
-            result = model(batch)
-            result= model.module.render_video(result, **config.inference.render_video_config)
-        elif 'rayzer' in config.model.class_name:
-            result = model(batch, create_visual=True, render_video=config.inference.get("render_video", False))
-        export_results(result, inference_out_dir, compute_metrics=config.inference.get("compute_metrics"))
+    for batch in tqdm(dataloader):
+        batch = {k: v.to(ddp_info.device) if type(
+            v) == torch.Tensor else v for k, v in batch.items()}
+        result = model(batch)
+
+        v_all = batch['image'].shape[1]
+        camera_tokens = collector.collect_camera_token(
+            result['n_cam'], result['n_patch'], v_all)
+        for k, v in camera_tokens.items():
+            data_to_save['camera_token'][k].append(v)
+        data_to_save['c2w'].append(batch['c2w'].cpu())
+
+    collector.unregister()
+    # stack along the first dimension
+    data_to_save['c2w'] = torch.cat(data_to_save['c2w'], dim=0)
+    for k, v in data_to_save['camera_token'].items():
+        data_to_save['camera_token'][k] = torch.cat(v, dim=0)
+
+    torch.save(data_to_save, os.path.join(
+        save_path, f"rank_{dist.get_rank()}.pt"))
     torch.cuda.empty_cache()
 
 
-dist.barrier()
-
-if ddp_info.is_main_process and config.inference.get("compute_metrics", False):
-    summarize_evaluation(inference_out_dir)
-    if config.inference.get("generate_website", True):
-        os.system(f"python generate_html.py {inference_out_dir}")
 dist.barrier()
 dist.destroy_process_group()
 exit(0)
