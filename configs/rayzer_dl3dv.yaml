@@ -86,6 +86,9 @@ training:
 # inference / evaluation
 inference:
   if_inference: False
+  batch_size_per_gpu: 1
+  num_workers: 0
+  prefetch_factor: 2
   compute_metrics: False
   view_idx_file_path: ./data/rayzer_evaluation_index_dl3dv_even.json
   render_video: False
